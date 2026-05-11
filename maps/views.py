@@ -14,6 +14,7 @@ from django.views.decorators.cache import cache_control
 from django.utils import timezone
 from datetime import timedelta
 import json
+import uuid
 from .models import (
     AmenityType,
     Amenity,
@@ -2625,3 +2626,135 @@ def report_availability_api(request, amenity_id):
             "user_vote": "available" if is_available else "unavailable",
         }
     )
+
+@csrf_exempt
+@login_required(login_url="/?auth_required=1")
+@require_http_methods(["POST", "GET"])
+def food_request_me_api(request):
+    """Raise a hand (POST) or get current active request (GET)."""
+    try:
+        dynamodb = get_dynamodb_resource()
+        table = dynamodb.Table(settings.DYNAMODB_TABLE_NAME)
+        
+        if request.method == "POST":
+            try:
+                data = json.loads(request.body)
+                lat = float(data.get("latitude"))
+                lon = float(data.get("longitude"))
+            except (ValueError, TypeError, json.JSONDecodeError):
+                return JsonResponse({"error": "Invalid coordinates"}, status=400)
+                
+            donation_code = str(uuid.uuid4())[:8].upper()
+            now_iso = timezone.now().isoformat()
+            
+            response = table.query(
+                KeyConditionExpression=Key("PK").eq("FOODREQUEST#ACTIVE") & Key("SK").eq(f"USER#{request.user.id}")
+            )
+            if response.get("Items"):
+                item = response["Items"][0]
+                item["Latitude"] = Decimal(str(lat))
+                item["Longitude"] = Decimal(str(lon))
+                table.put_item(Item=item)
+                return JsonResponse({"DonationCode": item["DonationCode"]}, status=200)
+                
+            item = {
+                "PK": "FOODREQUEST#ACTIVE",
+                "SK": f"USER#{request.user.id}",
+                "UserId": request.user.id,
+                "UserEmail": request.user.email,
+                "Latitude": Decimal(str(lat)),
+                "Longitude": Decimal(str(lon)),
+                "DonationCode": donation_code,
+                "CreatedAt": now_iso,
+            }
+            table.put_item(Item=item)
+            return JsonResponse({"DonationCode": donation_code}, status=201)
+            
+        elif request.method == "GET":
+            response = table.query(
+                KeyConditionExpression=Key("PK").eq("FOODREQUEST#ACTIVE") & Key("SK").eq(f"USER#{request.user.id}")
+            )
+            items = response.get("Items", [])
+            if items:
+                item = items[0]
+                item["Latitude"] = float(item["Latitude"])
+                item["Longitude"] = float(item["Longitude"])
+                return JsonResponse({"active_request": item}, status=200)
+            return JsonResponse({"active_request": None}, status=200)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+@csrf_exempt
+@login_required(login_url="/?auth_required=1")
+@require_http_methods(["POST"])
+def food_request_cancel_api(request):
+    try:
+        dynamodb = get_dynamodb_resource()
+        table = dynamodb.Table(settings.DYNAMODB_TABLE_NAME)
+        table.delete_item(
+            Key={
+                "PK": "FOODREQUEST#ACTIVE",
+                "SK": f"USER#{request.user.id}"
+            }
+        )
+        return JsonResponse({"message": "Cancelled"}, status=200)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+@require_http_methods(["GET"])
+def food_requests_active_api(request):
+    try:
+        dynamodb = get_dynamodb_resource()
+        table = dynamodb.Table(settings.DYNAMODB_TABLE_NAME)
+        response = table.query(
+            KeyConditionExpression=Key("PK").eq("FOODREQUEST#ACTIVE")
+        )
+        items = response.get("Items", [])
+        for item in items:
+            item["Latitude"] = float(item["Latitude"])
+            item["Longitude"] = float(item["Longitude"])
+        return JsonResponse({"requests": items}, status=200)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+@csrf_exempt
+@login_required(login_url="/?auth_required=1")
+@require_http_methods(["POST"])
+def food_request_fulfill_api(request):
+    try:
+        dynamodb = get_dynamodb_resource()
+        table = dynamodb.Table(settings.DYNAMODB_TABLE_NAME)
+        try:
+            data = json.loads(request.body)
+            donation_code = data.get("donation_code", "").strip().upper()
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Invalid JSON"}, status=400)
+            
+        response = table.query(
+            KeyConditionExpression=Key("PK").eq("FOODREQUEST#ACTIVE")
+        )
+        items = response.get("Items", [])
+        target_item = next((item for item in items if item.get("DonationCode") == donation_code), None)
+        
+        if not target_item:
+            return JsonResponse({"error": "Invalid or expired donation code"}, status=404)
+            
+        if target_item.get("UserId") == request.user.id:
+            return JsonResponse({"error": "You cannot fulfill your own request"}, status=400)
+            
+        table.delete_item(
+            Key={
+                "PK": "FOODREQUEST#ACTIVE",
+                "SK": target_item["SK"]
+            }
+        )
+        
+        target_item["PK"] = f"FOODREQUEST#FULFILLED#{target_item['UserId']}"
+        target_item["SK"] = timezone.now().isoformat()
+        target_item["FulfilledBy"] = request.user.id
+        target_item["FulfilledByEmail"] = request.user.email
+        table.put_item(Item=target_item)
+        
+        return JsonResponse({"message": "Donation recorded successfully!"}, status=200)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)

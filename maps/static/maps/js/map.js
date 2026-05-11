@@ -780,6 +780,9 @@ function showDetailPanel(amenity, activeTab = 'overview') {
     currentDetailAmenity = amenity;
     pinnedHoverAmenity = amenity;
 
+    document.querySelectorAll('.dp-tab').forEach(t => t.style.display = '');
+    document.getElementById('tab-overview').style.display = '';
+
     if (!nearbyHoverMarker) {
         nearbyHoverMarker = L.marker([amenity.latitude, amenity.longitude], {
             zIndexOffset: 1000, interactive: false,
@@ -2291,6 +2294,222 @@ function updateUserUI() {
     }
 }
 
+let foodRequestMarkers = L.layerGroup().addTo(map);
+
+function setupFoodRequests() {
+    // Add Raise Hand button
+    const btn = L.control({ position: 'bottomright' });
+    btn.onAdd = function() {
+        const div = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+        div.innerHTML = `<a href="#" id="raise-hand-btn" title="Request Food" style="font-size: 20px; line-height: 30px; text-align: center; text-decoration: none; display: block; background: #fff; width: 30px; height: 30px;">🙋</a>`;
+        return div;
+    };
+    btn.addTo(map);
+
+    document.getElementById('raise-hand-btn').addEventListener('click', (e) => {
+        e.preventDefault();
+        openRaiseHandModal();
+    });
+
+    // Add Scan QR button
+    const scanBtn = L.control({ position: 'bottomright' });
+    scanBtn.onAdd = function() {
+        const div = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+        div.innerHTML = `<a href="#" id="scan-qr-btn" title="Fulfill Request" style="font-size: 20px; line-height: 30px; text-align: center; text-decoration: none; display: block; background: #fff; width: 30px; height: 30px;">📷</a>`;
+        return div;
+    };
+    scanBtn.addTo(map);
+
+    document.getElementById('scan-qr-btn').addEventListener('click', (e) => {
+        e.preventDefault();
+        openScanQRModal();
+    });
+
+    setInterval(loadFoodRequests, 30000);
+    map.on('moveend', loadFoodRequests);
+    loadFoodRequests();
+}
+
+function loadFoodRequests() {
+    fetch('/api/food-requests/active/')
+        .then(r => r.json())
+        .then(data => {
+            foodRequestMarkers.clearLayers();
+            const requests = data.requests || [];
+            requests.forEach(req => {
+                const icon = L.divIcon({
+                    html: `<div style="font-size: 24px; text-shadow: 0 0 3px #fff;">🙋</div>`,
+                    className: 'food-req-marker',
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 24]
+                });
+                const marker = L.marker([req.Latitude, req.Longitude], { icon }).addTo(foodRequestMarkers);
+                
+                marker.on('click', () => {
+                    showFoodRequestPanel(req);
+                });
+            });
+        });
+}
+
+function openRaiseHandModal() {
+    if (!currentUser || !currentUser.is_authenticated) {
+        showAuthModal();
+        return;
+    }
+    
+    fetch('/api/food-requests/me/')
+        .then(r => r.json())
+        .then(data => {
+            if (data.active_request) {
+                showMyRequestModal(data.active_request);
+            } else {
+                if (userLocation) {
+                    submitRaiseHand(userLocation.latitude, userLocation.longitude);
+                } else {
+                    showToast('Please enable location to request food.', 'warn');
+                    initializeGeolocation(true);
+                }
+            }
+        });
+}
+
+function submitRaiseHand(lat, lon) {
+    fetch('/api/food-requests/me/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+        body: JSON.stringify({ latitude: lat, longitude: lon })
+    })
+    .then(r => r.json())
+    .then(req => {
+        showMyRequestModal(req);
+        loadFoodRequests();
+    });
+}
+
+function showMyRequestModal(req) {
+    let modal = document.getElementById('my-food-req-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'my-food-req-modal';
+        modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
+        document.body.appendChild(modal);
+    }
+    
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${req.DonationCode}`;
+    
+    modal.innerHTML = `
+        <div style="background:#fff;padding:20px;border-radius:12px;text-align:center;max-width:90%;width:300px;">
+            <h3 style="margin-top:0;color:var(--text-1)">Your Food Request is Active</h3>
+            <p style="color:var(--text-2)">Show this code to a donor:</p>
+            <img src="${qrUrl}" style="margin:20px auto; display:block;" alt="QR Code" />
+            <div style="font-size:24px;font-weight:bold;letter-spacing:2px;margin-bottom:20px;color:var(--text-1)">${req.DonationCode}</div>
+            <button id="cancel-req-btn" style="background:#dc2626;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;width:100%;font-weight:bold;">Cancel Request</button>
+            <button id="close-req-btn" style="background:#e5e7eb;color:#333;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;width:100%;margin-top:10px;font-weight:bold;">Close</button>
+        </div>
+    `;
+    modal.style.display = 'flex';
+    
+    document.getElementById('cancel-req-btn').onclick = () => {
+        fetch('/api/food-requests/cancel/', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': getCookie('csrftoken') }
+        }).then(() => {
+            modal.style.display = 'none';
+            showToast('Request cancelled', 'info');
+            loadFoodRequests();
+        });
+    };
+    document.getElementById('close-req-btn').onclick = () => modal.style.display = 'none';
+}
+
+function openScanQRModal() {
+    if (!currentUser || !currentUser.is_authenticated) {
+        showAuthModal();
+        return;
+    }
+    let modal = document.getElementById('scan-qr-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'scan-qr-modal';
+        modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
+        document.body.appendChild(modal);
+    }
+    modal.innerHTML = `
+        <div style="background:#fff;padding:20px;border-radius:12px;text-align:center;max-width:90%;width:300px;">
+            <h3 style="margin-top:0;color:var(--text-1)">Record Donation</h3>
+            <p style="color:var(--text-2)">Enter the donation code from the requester:</p>
+            <input type="text" id="donation-code-input" style="width:calc(100% - 22px);padding:10px;font-size:18px;text-align:center;margin-bottom:20px;border:1px solid var(--border);border-radius:8px;text-transform:uppercase;" placeholder="e.g. A1B2C3D4" />
+            <button id="submit-donation-btn" style="background:#16a34a;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;width:100%;font-weight:bold;">Record Donation</button>
+            <button id="close-scan-btn" style="background:#e5e7eb;color:#333;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;width:100%;margin-top:10px;font-weight:bold;">Cancel</button>
+        </div>
+    `;
+    modal.style.display = 'flex';
+    
+    document.getElementById('submit-donation-btn').onclick = () => {
+        const code = document.getElementById('donation-code-input').value;
+        fetch('/api/food-requests/fulfill/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+            body: JSON.stringify({ donation_code: code })
+        })
+        .then(r => r.json().then(d => ({s: r.status, d})))
+        .then(({s, d}) => {
+            if (s === 200) {
+                showToast(d.message, 'success');
+                modal.style.display = 'none';
+                loadFoodRequests();
+            } else {
+                showToast(d.error || 'Failed to record donation', 'error');
+            }
+        });
+    };
+    document.getElementById('close-scan-btn').onclick = () => modal.style.display = 'none';
+}
+
+function showFoodRequestPanel(req) {
+    currentDetailAmenity = null;
+    document.getElementById('detail-name').textContent = "Food Request";
+    document.getElementById('detail-type-badge').textContent = "Hand Raised";
+    
+    document.querySelectorAll('.dp-tab').forEach(t => t.style.display = 'none');
+    document.getElementById('tab-overview').style.display = 'block';
+    
+    const walkUrl  = `https://www.google.com/maps/dir/?api=1&destination=${req.Latitude},${req.Longitude}&travelmode=walking`;
+    
+    let html = `
+        <div class="dp-section">
+            <div class="dp-field-label">User</div>
+            <div class="dp-field-value">${req.UserEmail.replace(/[&<>"']/g, m => ({'&': '&amp;','<': '&lt;','>': '&gt;','"': '&quot;',"'": '&#039;'}[m]))}</div>
+        </div>
+        <div class="dp-section">
+            <div class="dp-field-label">Requested At</div>
+            <div class="dp-field-value">${new Date(req.CreatedAt).toLocaleString()}</div>
+        </div>
+        <div class="dp-section">
+            <div class="dp-nav">
+                <a href="${walkUrl}" target="_blank" class="dp-nav-btn">🚶 Navigate</a>
+                <button type="button" class="dp-nav-btn" id="chat-req-btn">💬 Chat</button>
+                <button type="button" class="dp-nav-btn" id="donate-req-btn" style="background:var(--green);color:#fff;">🤝 Donate (Scan Code)</button>
+            </div>
+        </div>
+    `;
+    
+    document.getElementById('tab-overview').innerHTML = html;
+    
+    document.getElementById('chat-req-btn').onclick = () => {
+        showMessagingMenu(req.UserEmail, {});
+    };
+    
+    document.getElementById('donate-req-btn').onclick = () => {
+        openScanQRModal();
+    };
+    
+    const panel = document.getElementById('detail-panel');
+    panel.classList.add('open');
+    document.body.classList.add('detail-open');
+}
+
 function focusAmenityFromQuery(amenityId) {
     const safeAmenityId = String(amenityId || '').trim();
     if (!safeAmenityId) return;
@@ -2495,6 +2714,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     loadAmenityTypes();
     setupPWA();
+
+    setupFoodRequests();
 
     map.addLayer(bikeRackMarkers);
     map.addLayer(otherAmenityMarkers);

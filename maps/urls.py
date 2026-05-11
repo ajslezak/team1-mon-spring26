@@ -86,6 +86,11 @@ urlpatterns = [
         views.get_amenity_reviews_api,
         name="get_amenity_reviews_api",
     ),
+    # Food request endpoints
+    path("api/food-requests/me/", views.food_request_me_api, name="food_request_me_api"),
+    path("api/food-requests/cancel/", views.food_request_cancel_api, name="food_request_cancel_api"),
+    path("api/food-requests/active/", views.food_requests_active_api, name="food_requests_active_api"),
+    path("api/food-requests/fulfill/", views.food_request_fulfill_api, name="food_request_fulfill_api"),
     # Chat endpoints
     path("api/chats/", views.get_user_chats_api, name="get_user_chats_api"),
     path(

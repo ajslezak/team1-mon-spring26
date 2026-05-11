@@ -12,6 +12,24 @@ cleanup() {
 # Catch Ctrl+C (SIGINT) and terminal kill (SIGTERM)
 trap cleanup SIGINT SIGTERM
 
+# Auto-activate virtual environment if it exists
+if [ -f "venv/bin/activate" ]; then
+    source venv/bin/activate
+fi
+
+# Force load .env variables to override stale terminal exports
+if [ -f ".env" ]; then
+    set -a
+    source .env
+    set +a
+fi
+
+if [ -f ".env.local" ]; then
+    set -a
+    source .env.local
+    set +a
+fi
+
 echo "[Startup] Starting Django WSGI server..."
 if [[ -s `which python` ]]; then
     PYTHON_CMD="python"
