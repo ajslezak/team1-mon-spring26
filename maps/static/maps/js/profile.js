@@ -631,6 +631,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (isDeleteMode) {
             setReviewSheetMenuVisible(false);
+            if (reviewSheetPanel) reviewSheetPanel.style.cursor = 'default';
             reviewSheetHeaderCopy.innerHTML = `
                 <h2 class="profile-review-sheet-title" id="review-sheet-title">${escapeHtml(amenityDisplayName)}</h2>
                 ${renderAmenityTypeBadge(review)}
@@ -659,6 +660,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!isEditMode) {
             setReviewSheetMenuVisible(isOwnProfile);
+            if (reviewSheetPanel) reviewSheetPanel.style.cursor = 'pointer';
             reviewSheetHeaderCopy.innerHTML = `
                 <h2 class="profile-review-sheet-title" id="review-sheet-title">${escapeHtml(amenityDisplayName)}</h2>
                 ${renderAmenityTypeBadge(review)}
@@ -689,6 +691,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         setReviewSheetMenuVisible(false);
+        if (reviewSheetPanel) reviewSheetPanel.style.cursor = 'default';
         reviewSheetHeaderCopy.innerHTML = `
             <h2 class="profile-review-sheet-title" id="review-sheet-title">${escapeHtml(amenityDisplayName)}</h2>
             ${renderAmenityTypeBadge(review)}
@@ -1253,6 +1256,26 @@ document.addEventListener('DOMContentLoaded', () => {
             if (event.target.closest('.js-sheet-confirm-delete')) {
                 if (!isOwnProfile) return;
                 deleteActiveReview();
+                return;
+            }
+
+            // Allow clicking anywhere on the pane to view the amenity on the map
+            if (state.reviewSheetMode === 'view') {
+                const panel = event.target.closest('#review-sheet-panel');
+                if (!panel) return;
+
+                const interactiveSelector = 'button, a, input, textarea, .profile-review-sheet-menu';
+                if (event.target.closest(interactiveSelector)) return;
+
+                if (window.getSelection().toString().length > 0) return; // Prevent redirect if the user is just highlighting text to copy
+
+                const review = getActiveReview();
+                if (review && review.amenity_id) {
+                    const mapUrl = String(pageRoot.dataset.mapUrl || '/').trim() || '/';
+                    const url = new URL(mapUrl, window.location.origin);
+                    url.searchParams.set('amenity_id', String(review.amenity_id));
+                    window.location.href = `${url.pathname}${url.search}`;
+                }
             }
         });
     }
