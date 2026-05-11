@@ -820,7 +820,7 @@ function showDetailPanel(amenity, activeTab = 'overview') {
     fetch(`/api/amenities/${amenity.id}/`)
         .then(r => r.json())
         .then(data => {
-            if (data.amenity && currentDetailAmenity && currentDetailAmenity.id === amenity.id) {
+            if (data.amenity && currentDetailAmenity && String(currentDetailAmenity.id) === String(amenity.id)) {
                 Object.assign(amenity, data.amenity);
                 renderOverviewTab(amenity);
                 renderReviewsTab(amenity);
@@ -1028,7 +1028,7 @@ function wireFavoriteToggle(amenity) {
 function updateAmenityFavoriteStateInCache(amenityId, isFavorited) {
     Object.values(allAmenitiesData).forEach(items => {
         items.forEach(item => {
-            if (Number(item.id) === Number(amenityId)) {
+            if (String(item.id) === String(amenityId)) {
                 item.is_favorited = isFavorited;
             }
         });
@@ -1061,7 +1061,7 @@ function toggleAmenityFavorite(amenity, buttonEl) {
             amenity.is_favorited = nextValue;
             updateAmenityFavoriteStateInCache(amenity.id, nextValue);
 
-            if (currentDetailAmenity && Number(currentDetailAmenity.id) === Number(amenity.id)) {
+            if (currentDetailAmenity && String(currentDetailAmenity.id) === String(amenity.id)) {
                 currentDetailAmenity.is_favorited = nextValue;
             }
 
@@ -2292,10 +2292,10 @@ function updateUserUI() {
 }
 
 function focusAmenityFromQuery(amenityId) {
-    const numericAmenityId = Number(amenityId || 0);
-    if (!numericAmenityId) return;
+    const safeAmenityId = String(amenityId || '').trim();
+    if (!safeAmenityId) return;
 
-    fetch(`/api/amenities/${numericAmenityId}/`, {
+    fetch(`/api/amenities/${encodeURIComponent(safeAmenityId)}/`, {
         method: 'GET',
         credentials: 'same-origin',
     })
@@ -2460,6 +2460,10 @@ window.addEventListener('beforeunload', () => {
 document.addEventListener('DOMContentLoaded', () => {
     const queryAmenityId = new URLSearchParams(window.location.search).get('amenity_id');
 
+    if (queryAmenityId) {
+        pendingAmenityFromQuery = queryAmenityId;
+    }
+
     setupAuth();
     setupSidebarToggle();
     setupHoursFilter();
@@ -2491,10 +2495,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     loadAmenityTypes();
     setupPWA();
-
-    if (queryAmenityId) {
-        pendingAmenityFromQuery = queryAmenityId;
-    }
 
     map.addLayer(bikeRackMarkers);
     map.addLayer(otherAmenityMarkers);
