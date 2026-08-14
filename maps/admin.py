@@ -9,6 +9,7 @@ from .models import (
     ChatParticipant,
     Message,
     Favorite,
+    FoodDonation,
 )
 
 
@@ -157,3 +158,11 @@ class MessageAdmin(admin.ModelAdmin):
     list_filter = ["chat", "sender", "created_at"]
     search_fields = ["sender__email", "chat__name", "content"]
     readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(FoodDonation)
+class FoodDonationAdmin(admin.ModelAdmin):
+    list_display = ["donor", "requester", "created_at", "solana_tx_signature"]
+    list_filter = ["created_at"]
+    search_fields = ["donor__email", "requester__email", "solana_tx_signature"]
+    readonly_fields = ("created_at",)

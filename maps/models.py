@@ -487,3 +487,36 @@ class AvailabilityReport(models.Model):
     def __str__(self):
         status = "available" if self.is_available else "unavailable"
         return f"{self.amenity.name} reported {status} at {self.reported_at}"
+
+
+class FoodDonation(models.Model):
+    """Permanent record of a fulfilled food donation."""
+
+    requester = models.ForeignKey(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="food_requests_received",
+    )
+    donor = models.ForeignKey(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="food_donations_given",
+    )
+    solana_tx_signature = models.CharField(max_length=150, blank=True, null=True)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["donor", "-created_at"]),
+            models.Index(fields=["requester", "-created_at"]),
+        ]
+
+    def __str__(self):
+        donor_email = self.donor.email if self.donor else "Unknown"
+        req_email = self.requester.email if self.requester else "Unknown"
+        return f"Donation from {donor_email} to {req_email}"

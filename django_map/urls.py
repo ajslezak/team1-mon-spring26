@@ -20,6 +20,7 @@ from django.contrib.auth import views as auth_views
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from maps.views import food_request_confirm_api
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -54,6 +55,7 @@ urlpatterns = [
         name="password_reset_complete",
     ),
     path("accounts/", include("allauth.urls")),
+    path("api/food-requests/confirm/", food_request_confirm_api, name="food_request_confirm"),
     path("", include("maps.urls")),
 ]
 

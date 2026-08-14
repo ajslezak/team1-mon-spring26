@@ -25,6 +25,13 @@ Site.objects.update_or_create(id=1, defaults={'domain': domain, 'name': 'NYC Now
 
 python manage.py create_dynamodb_table
 
+OS_TYPE=$(uname)
+if [[ "$OS_TYPE" != "Linux" ]]; then
+    python manage.py import_nyc_water_fountains && python manage.py import_nyc_public_restrooms && python manage.py import_cooling_sites && python manage.py import_linknyc_kiosks && python manage.py import_bike_racks
+    echo "Non-Linux OS detected ($OS_TYPE). Skipping S3 backup setup."
+    exit 0
+fi
+
 echo "Setting up background data imports..."
 cat << 'EOF' > /home/ec2-user/app/run_imports.sh
 #!/bin/bash
@@ -38,6 +45,7 @@ if [ ! -f "/home/ec2-user/app/.imports_started" ]; then
     nohup /home/ec2-user/app/run_imports.sh > /home/ec2-user/app/imports.log 2>&1 &
     touch /home/ec2-user/app/.imports_started
 fi
+
 
 echo "Setting up automatic S3 backup for SQLite database..."
 cat << 'EOF' > /home/ec2-user/app/backup_db.py

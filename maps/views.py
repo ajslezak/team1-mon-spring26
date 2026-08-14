@@ -26,6 +26,7 @@ from .models import (
     Message,
     ReviewVote,
     Favorite,
+    FoodDonation,
 )
 from django.db.models import (
     Count,
@@ -2627,6 +2628,28 @@ def report_availability_api(request, amenity_id):
         }
     )
 
+
+def broadcast_food_event(event_type, trigger_user_id, event_data, target_user_id=None):
+    """Helper to broadcast food request updates to all other connected clients via SSE."""
+    payload = json.dumps({
+        "type": event_type,
+        "data": event_data
+    })
+    if target_user_id:
+        user_ids = [target_user_id]
+    else:
+        user_ids = list(CustomUser.objects.filter(is_active=True).exclude(id=trigger_user_id).values_list('id', flat=True))
+    
+    def send_notifications():
+        for uid in user_ids:
+            try:
+                requests.post("http://127.0.0.1:8001/api/internal/publish/", json={"user_id": uid, "payload": payload}, timeout=1)
+            except Exception:
+                pass
+                
+    threading.Thread(target=send_notifications).start()
+
+
 @csrf_exempt
 @login_required(login_url="/?auth_required=1")
 @require_http_methods(["POST", "GET"])
@@ -2646,6 +2669,7 @@ def food_request_me_api(request):
                 
             donation_code = str(uuid.uuid4())[:8].upper()
             now_iso = timezone.now().isoformat()
+            expires_at = int((timezone.now() + timedelta(hours=4)).timestamp())
             
             response = table.query(
                 KeyConditionExpression=Key("PK").eq("FOODREQUEST#ACTIVE") & Key("SK").eq(f"USER#{request.user.id}")
@@ -2654,7 +2678,15 @@ def food_request_me_api(request):
                 item = response["Items"][0]
                 item["Latitude"] = Decimal(str(lat))
                 item["Longitude"] = Decimal(str(lon))
+                item["ExpiresAt"] = expires_at
                 table.put_item(Item=item)
+                
+                broadcast_food_event("food_request_active", request.user.id, {
+                    "UserId": request.user.id,
+                    "UserEmail": request.user.email,
+                    "Latitude": lat,
+                    "Longitude": lon
+                })
                 return JsonResponse({"DonationCode": item["DonationCode"]}, status=200)
                 
             item = {
@@ -2666,8 +2698,16 @@ def food_request_me_api(request):
                 "Longitude": Decimal(str(lon)),
                 "DonationCode": donation_code,
                 "CreatedAt": now_iso,
+                "ExpiresAt": expires_at,
             }
             table.put_item(Item=item)
+            
+            broadcast_food_event("food_request_active", request.user.id, {
+                "UserId": request.user.id,
+                "UserEmail": request.user.email,
+                "Latitude": lat,
+                "Longitude": lon
+            })
             return JsonResponse({"DonationCode": donation_code}, status=201)
             
         elif request.method == "GET":
@@ -2677,9 +2717,16 @@ def food_request_me_api(request):
             items = response.get("Items", [])
             if items:
                 item = items[0]
-                item["Latitude"] = float(item["Latitude"])
-                item["Longitude"] = float(item["Longitude"])
-                return JsonResponse({"active_request": item}, status=200)
+                current_time = int(timezone.now().timestamp())
+                if item.get("ExpiresAt", current_time + 1) >= current_time:
+                    item["Latitude"] = float(item["Latitude"])
+                    item["Longitude"] = float(item["Longitude"])
+                    item["UserId"] = int(item.get("UserId", 0))
+                    if "ExpiresAt" in item:
+                        item["ExpiresAt"] = int(item["ExpiresAt"])
+                    if item.get("DonorId"):
+                        item["DonorId"] = int(item["DonorId"])
+                    return JsonResponse({"active_request": item}, status=200)
             return JsonResponse({"active_request": None}, status=200)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
@@ -2697,6 +2744,7 @@ def food_request_cancel_api(request):
                 "SK": f"USER#{request.user.id}"
             }
         )
+        broadcast_food_event("food_request_removed", request.user.id, {"UserId": request.user.id})
         return JsonResponse({"message": "Cancelled"}, status=200)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
@@ -2710,10 +2758,19 @@ def food_requests_active_api(request):
             KeyConditionExpression=Key("PK").eq("FOODREQUEST#ACTIVE")
         )
         items = response.get("Items", [])
+        current_time = int(timezone.now().timestamp())
+        active_items = []
         for item in items:
-            item["Latitude"] = float(item["Latitude"])
-            item["Longitude"] = float(item["Longitude"])
-        return JsonResponse({"requests": items}, status=200)
+            if item.get("ExpiresAt", current_time + 1) >= current_time:
+                item["Latitude"] = float(item["Latitude"])
+                item["Longitude"] = float(item["Longitude"])
+                item["UserId"] = int(item.get("UserId", 0))
+                if "ExpiresAt" in item:
+                    item["ExpiresAt"] = int(item["ExpiresAt"])
+                if item.get("DonorId"):
+                    item["DonorId"] = int(item["DonorId"])
+                active_items.append(item)
+        return JsonResponse({"requests": active_items}, status=200)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
@@ -2742,6 +2799,102 @@ def food_request_fulfill_api(request):
         if target_item.get("UserId") == request.user.id:
             return JsonResponse({"error": "You cannot fulfill your own request"}, status=400)
             
+        # Instead of deleting immediately, mark as PendingConfirmation
+        target_item["Status"] = "PendingConfirmation"
+        target_item["DonorId"] = request.user.id
+        target_item["DonorEmail"] = request.user.email
+        table.put_item(Item=target_item)
+        
+        # Notify recipient to confirm
+        broadcast_food_event(
+            "food_request_pending_confirmation", 
+            request.user.id, 
+            {"UserId": target_item["UserId"], "DonorEmail": request.user.email},
+            target_user_id=target_item["UserId"]
+        )
+        return JsonResponse({"message": "Code scanned! Waiting for recipient to confirm."}, status=200)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+def record_donation_on_solana(donor_email, recipient_email):
+    """
+    Records a donation on a local Solana test validator using the Memo program.
+    Requires: pip install solana solders
+    """
+    try:
+        from solana.rpc.api import Client
+        from solders.keypair import Keypair
+        from solders.transaction import VersionedTransaction
+        from solders.message import Message
+        from solders.instruction import Instruction
+        from solders.pubkey import Pubkey
+        import time
+
+        # Connect to local test validator
+        client = Client("http://127.0.0.1:8899")
+        
+        # Generate a random keypair for the fee payer
+        payer = Keypair()
+        
+        # Request airdrop to pay for transaction fees
+        client.request_airdrop(payer.pubkey(), 1000000000)
+        time.sleep(1) # wait for airdrop to process
+        
+        # Create a memo instruction
+        memo_program_id = Pubkey.from_string("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")
+        memo_data = f"Food donation: {donor_email} -> {recipient_email}".encode('utf-8')
+        
+        instruction = Instruction(
+            program_id=memo_program_id,
+            accounts=[],
+            data=memo_data
+        )
+        
+        # Build and send transaction
+        recent_blockhash = client.get_latest_blockhash().value.blockhash
+        msg = Message.new_with_blockhash(
+            [instruction],
+            payer.pubkey(),
+            recent_blockhash
+        )
+        txn = VersionedTransaction(msg, [payer])
+        
+        signature = client.send_transaction(txn)
+        return str(signature.value)
+    except ImportError:
+        print("Solana libraries (solana, solders) not installed. Skipping blockchain record.")
+        return None
+    except Exception as e:
+        print(f"Solana transaction failed: {e}")
+        return None
+
+@csrf_exempt
+@login_required(login_url="/?auth_required=1")
+@require_http_methods(["POST"])
+def food_request_confirm_api(request):
+    try:
+        dynamodb = get_dynamodb_resource()
+        table = dynamodb.Table(settings.DYNAMODB_TABLE_NAME)
+        
+        # Get active request for current user
+        response = table.query(
+            KeyConditionExpression=Key("PK").eq("FOODREQUEST#ACTIVE") & Key("SK").eq(f"USER#{request.user.id}")
+        )
+        items = response.get("Items", [])
+        if not items:
+            return JsonResponse({"error": "No active request found"}, status=404)
+            
+        target_item = items[0]
+        if target_item.get("Status") != "PendingConfirmation":
+            return JsonResponse({"error": "Request is not pending confirmation"}, status=400)
+            
+        # Record on Solana
+        donor_email = target_item.get("DonorEmail", "Unknown")
+        recipient_email = request.user.email
+        tx_signature = record_donation_on_solana(donor_email, recipient_email)
+        
+        # Move to fulfilled
+        # Delete active request from ephemeral DynamoDB
         table.delete_item(
             Key={
                 "PK": "FOODREQUEST#ACTIVE",
@@ -2749,12 +2902,30 @@ def food_request_fulfill_api(request):
             }
         )
         
-        target_item["PK"] = f"FOODREQUEST#FULFILLED#{target_item['UserId']}"
-        target_item["SK"] = timezone.now().isoformat()
-        target_item["FulfilledBy"] = request.user.id
-        target_item["FulfilledByEmail"] = request.user.email
-        table.put_item(Item=target_item)
+        # Save permanent record to SQL database
+        donor_id = target_item.get("DonorId")
+        donor_user = CustomUser.objects.filter(id=donor_id).first() if donor_id else None
         
-        return JsonResponse({"message": "Donation recorded successfully!"}, status=200)
+        FoodDonation.objects.create(
+            requester=request.user,
+            donor=donor_user,
+            solana_tx_signature=tx_signature,
+            latitude=float(target_item.get("Latitude", 0)),
+            longitude=float(target_item.get("Longitude", 0))
+        )
+        
+        # Broadcast removal to update map markers for everyone else
+        broadcast_food_event("food_request_removed", request.user.id, {"UserId": target_item["UserId"]})
+        
+        # Notify donor that it was confirmed
+        if target_item.get("DonorId"):
+            broadcast_food_event(
+                "food_donation_confirmed", 
+                request.user.id, 
+                {"Message": "Recipient has confirmed the food donation! Recorded on Solana blockchain."},
+                target_user_id=target_item["DonorId"]
+            )
+            
+        return JsonResponse({"message": "Receipt confirmed and recorded on blockchain!", "tx": tx_signature}, status=200)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)

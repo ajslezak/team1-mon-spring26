@@ -228,6 +228,32 @@ document.addEventListener('DOMContentLoaded', () => {
                         const actorEmail = msgData.actor_email || 'Another user';
                         showToast(`${actorEmail} added a review for ${amenityName}.`, 'info');
                         playNotificationSound();
+                    } else if (msgData.type === 'food_request_active') {
+                        const wantsNotifications = localStorage.getItem('notify_food_requests') === 'true';
+                        if (wantsNotifications) {
+                            showToast(`🙋 ${msgData.data.UserEmail} is requesting food nearby!`, 'info', 6000);
+                            playNotificationSound();
+                        }
+                        if (typeof loadFoodRequests === 'function') loadFoodRequests();
+                    } else if (msgData.type === 'food_request_removed') {
+                        // Silently refresh the map to drop the fulfilled/cancelled pin
+                        if (typeof loadFoodRequests === 'function') loadFoodRequests();
+                    } else if (msgData.type === 'food_request_pending_confirmation') {
+                        showToast(`A donor has scanned your code! Please confirm receipt.`, 'success', 6000);
+                        // Refresh the modal if open
+                        if (typeof showMyRequestModal === 'function') {
+                            fetch('/api/food-requests/me/')
+                                .then(r => r.json())
+                                .then(data => {
+                                    if (data.active_request) {
+                                        showMyRequestModal(data.active_request);
+                                    }
+                                });
+                        }
+                        playNotificationSound();
+                    } else if (msgData.type === 'food_donation_confirmed') {
+                        showToast(msgData.data.Message, 'success', 6000);
+                        playNotificationSound();
                     } else if (msgData.error === 'unauthorized') {
                         if (sseSource) {
                             sseSource.close();

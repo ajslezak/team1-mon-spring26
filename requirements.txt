@@ -15,3 +15,5 @@ gunicorn
 geohash2
 geojson
 python-dotenv
+solana
+solders

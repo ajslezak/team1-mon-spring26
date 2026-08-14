@@ -1,0 +1,19 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "TrustEventBridgeService",
+            "Effect": "Allow",
+            "Principal": {
+                "Service": "events.amazonaws.com"
+            },
+            "Action": "sts:AssumeRole",
+            "Condition": {
+                "StringEquals": {
+                    "aws:SourceAccount": "793314585930",
+                    "aws:SourceArn": "arn:aws:events:us-east-2:793314585930:rule/ec2-redeploy-on-replace"
+                }
+            }
+        }
+    ]
+}

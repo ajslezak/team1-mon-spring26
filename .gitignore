@@ -231,3 +231,5 @@ override.tf.json
 terraform.rc
 db.sqlite3
 db 2.sqlite3
+dynamodb_data/
+.DS_Store

@@ -2285,6 +2285,9 @@ function updateUserUI() {
         if (typeof hideChatsLink === 'function') {
             hideChatsLink();
         }
+        if (typeof updateActiveRequestIndicator === 'function') {
+            updateActiveRequestIndicator(false);
+        }
     }
 
     if (currentDetailAmenity) {
@@ -2292,9 +2295,58 @@ function updateUserUI() {
         wireFavoriteToggle(currentDetailAmenity);
         renderReviewsTab(currentDetailAmenity);
     }
+        
+        if (typeof loadFoodRequests === 'function') {
+            loadFoodRequests();
+        }
 }
 
 let foodRequestMarkers = L.layerGroup().addTo(map);
+let foodRequestWatchId = null;
+let lastFoodRequestLoc = null;
+
+function startFoodRequestTracking() {
+    if (foodRequestWatchId) return;
+    if (!navigator.geolocation) return;
+
+    foodRequestWatchId = navigator.geolocation.watchPosition(
+        (pos) => {
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+
+            if (lastFoodRequestLoc) {
+                const distKm = haversineKm(lastFoodRequestLoc.lat, lastFoodRequestLoc.lon, lat, lon);
+                // Only update the backend if the user moved more than ~15 meters
+                if (distKm < 0.015) return;
+            }
+
+            lastFoodRequestLoc = { lat, lon };
+
+            // Keep main user location in sync
+            userLocation = { latitude: lat, longitude: lon };
+            if (userMarker) {
+                userMarker.setLatLng([lat, lon]);
+            }
+
+            // Silently update active request coordinates on the server
+            fetch('/api/food-requests/me/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+                body: JSON.stringify({ latitude: lat, longitude: lon })
+            }).catch(err => console.warn('Failed to update food request location', err));
+        },
+        (err) => console.warn('Location tracking error:', err),
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+    );
+}
+
+function stopFoodRequestTracking() {
+    if (foodRequestWatchId) {
+        navigator.geolocation.clearWatch(foodRequestWatchId);
+        foodRequestWatchId = null;
+    }
+    lastFoodRequestLoc = null;
+}
 
 function setupFoodRequests() {
     // Add Raise Hand button
@@ -2311,6 +2363,26 @@ function setupFoodRequests() {
         openRaiseHandModal();
     });
 
+    // Add Notify Toggle button
+    const notifyBtn = L.control({ position: 'bottomright' });
+    notifyBtn.onAdd = function() {
+        const div = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+        const isEnabled = localStorage.getItem('notify_food_requests') === 'true';
+        div.innerHTML = `<a href="#" id="notify-req-btn" title="Toggle Food Request Notifications" style="font-size: 20px; line-height: 30px; text-align: center; text-decoration: none; display: block; background: ${isEnabled ? '#dcfce7' : '#fff'}; width: 30px; height: 30px;">${isEnabled ? '🔔' : '🔕'}</a>`;
+        return div;
+    };
+    notifyBtn.addTo(map);
+
+    document.getElementById('notify-req-btn').addEventListener('click', (e) => {
+        e.preventDefault();
+        const currentlyEnabled = localStorage.getItem('notify_food_requests') === 'true';
+        const nextState = !currentlyEnabled;
+        localStorage.setItem('notify_food_requests', nextState ? 'true' : 'false');
+        e.currentTarget.style.background = nextState ? '#dcfce7' : '#fff';
+        e.currentTarget.innerHTML = nextState ? '🔔' : '🔕';
+        showToast(nextState ? 'Food request notifications enabled' : 'Food request notifications disabled', 'info');
+    });
+
     // Add Scan QR button
     const scanBtn = L.control({ position: 'bottomright' });
     scanBtn.onAdd = function() {
@@ -2325,9 +2397,121 @@ function setupFoodRequests() {
         openScanQRModal();
     });
 
-    setInterval(loadFoodRequests, 30000);
+    if (!document.getElementById('show-food-requests')) {
+        const onlyAccessibleEl = document.getElementById('only-accessible');
+        if (onlyAccessibleEl) {
+            const container = onlyAccessibleEl.closest('label') || onlyAccessibleEl.parentElement;
+            container.parentElement.style.flexWrap = 'wrap';
+
+            const newLabel = container.cloneNode(true);
+            newLabel.style.marginTop = '10px';
+            newLabel.style.flexBasis = '100%';
+            
+            if (newLabel.tagName.toLowerCase() === 'label') {
+                newLabel.setAttribute('for', 'show-food-requests');
+            }
+            
+            newLabel.innerHTML = newLabel.innerHTML.replace(/Accessible only/i, 'Show Food Requests').replace(/only-accessible/g, 'show-food-requests');
+            
+            const isChecked = localStorage.getItem('showFoodRequests') !== 'false';
+            const checkbox = newLabel.querySelector('input[type="checkbox"]');
+            if (checkbox) {
+                checkbox.checked = isChecked;
+            }
+            
+            container.parentElement.appendChild(newLabel);
+            
+            document.getElementById('show-food-requests').addEventListener('change', (e) => {
+                localStorage.setItem('showFoodRequests', e.target.checked);
+                loadFoodRequests();
+            });
+        }
+    }
+
     map.on('moveend', loadFoodRequests);
     loadFoodRequests();
+}
+
+function updateActiveRequestIndicator(isActive) {
+    let indicator = document.getElementById('active-food-req-indicator');
+    if (!indicator) {
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes pulse-ring {
+                0% { transform: scale(0.8); opacity: 0.8; }
+                100% { transform: scale(2.5); opacity: 0; }
+            }
+            .active-req-indicator {
+                position: fixed;
+                top: 15px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: var(--surface, #fff);
+                border-radius: 20px;
+                padding: 6px 16px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                z-index: 10000;
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 600;
+                color: var(--text-1, #111);
+                border: 1px solid #eab308;
+                transition: opacity 0.2s ease;
+            }
+            .active-req-bell-wrap {
+                position: relative;
+                width: 20px;
+                height: 20px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .active-req-ring {
+                position: absolute;
+                width: 100%;
+                height: 100%;
+                border-radius: 50%;
+                background: #eab308;
+                animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+            }
+            .active-req-bell {
+                position: relative;
+                z-index: 2;
+                font-size: 14px;
+            }
+        `;
+        document.head.appendChild(style);
+
+        indicator = document.createElement('div');
+        indicator.id = 'active-food-req-indicator';
+        indicator.className = 'active-req-indicator';
+        indicator.innerHTML = `
+            <div class="active-req-bell-wrap">
+                <div class="active-req-ring"></div>
+                <div class="active-req-ring" style="animation-delay: 0.75s;"></div>
+                <div class="active-req-bell">🔔</div>
+            </div>
+            <span>Sharing Location</span>
+        `;
+        
+        // Attach to body with max z-index to avoid layout interference
+        indicator.style.zIndex = '2147483647';
+        document.body.appendChild(indicator);
+    }
+    
+    indicator.onclick = () => {
+        if (indicator.dataset.lat && indicator.dataset.lon && typeof map !== 'undefined') {
+            map.flyTo([parseFloat(indicator.dataset.lat), parseFloat(indicator.dataset.lon)], 17);
+        }
+        if (typeof openRaiseHandModal === 'function') {
+            openRaiseHandModal();
+        }
+    };
+
+    indicator.style.display = isActive ? 'flex' : 'none';
 }
 
 function loadFoodRequests() {
@@ -2335,20 +2519,50 @@ function loadFoodRequests() {
         .then(r => r.json())
         .then(data => {
             foodRequestMarkers.clearLayers();
+            const showCb = document.getElementById('show-food-requests');
+            const shouldShowMarkers = !showCb || showCb.checked;
+            
             const requests = data.requests || [];
+            let myRequest = null;
+            
             requests.forEach(req => {
-                const icon = L.divIcon({
-                    html: `<div style="font-size: 24px; text-shadow: 0 0 3px #fff;">🙋</div>`,
-                    className: 'food-req-marker',
-                    iconSize: [24, 24],
-                    iconAnchor: [12, 24]
-                });
-                const marker = L.marker([req.Latitude, req.Longitude], { icon }).addTo(foodRequestMarkers);
+                if (currentUser && req.UserId === currentUser.id) {
+                    myRequest = req;
+                }
                 
-                marker.on('click', () => {
-                    showFoodRequestPanel(req);
-                });
+                if (shouldShowMarkers) {
+                    const isMine = currentUser && req.UserId === currentUser.id;
+                    const icon = L.divIcon({
+                        html: `<div style="font-size: 26px; text-shadow: 0 0 4px rgba(255,255,255,0.8); filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));">${isMine ? '🙋' : '🥡'}</div>`,
+                        className: 'food-req-marker',
+                        iconSize: [26, 26],
+                        iconAnchor: [13, 26]
+                    });
+                    const marker = L.marker([req.Latitude, req.Longitude], { icon }).addTo(foodRequestMarkers);
+                    
+                    marker.on('click', () => {
+                        if (isMine) {
+                            openRaiseHandModal();
+                        } else {
+                            showFoodRequestPanel(req);
+                        }
+                    });
+                }
             });
+            
+            updateActiveRequestIndicator(!!myRequest);
+            
+            if (myRequest) {
+                startFoodRequestTracking();
+            } else {
+                stopFoodRequestTracking();
+            }
+            
+            const indicator = document.getElementById('active-food-req-indicator');
+            if (indicator && myRequest) {
+                indicator.dataset.lat = myRequest.Latitude;
+                indicator.dataset.lon = myRequest.Longitude;
+            }
         });
 }
 
@@ -2398,29 +2612,71 @@ function showMyRequestModal(req) {
     
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${req.DonationCode}`;
     
-    modal.innerHTML = `
-        <div style="background:#fff;padding:20px;border-radius:12px;text-align:center;max-width:90%;width:300px;">
+    let contentHtml = '';
+    if (req.Status === 'PendingConfirmation') {
+        contentHtml = `
+            <h3 style="margin-top:0;color:var(--text-1)">Confirm Receipt</h3>
+            <p style="color:var(--text-2)">Donor <strong>${req.DonorEmail || 'Someone'}</strong> has scanned your code.</p>
+            <p style="color:var(--text-2)">Did you receive the food?</p>
+            <button id="confirm-req-btn" style="background:#16a34a;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;width:100%;font-weight:bold;margin-bottom:10px;">Yes, Confirm Receipt</button>
+            <button id="cancel-req-btn" style="background:#dc2626;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;width:100%;font-weight:bold;">No, Cancel Request</button>
+        `;
+    } else {
+        contentHtml = `
             <h3 style="margin-top:0;color:var(--text-1)">Your Food Request is Active</h3>
             <p style="color:var(--text-2)">Show this code to a donor:</p>
             <img src="${qrUrl}" style="margin:20px auto; display:block;" alt="QR Code" />
             <div style="font-size:24px;font-weight:bold;letter-spacing:2px;margin-bottom:20px;color:var(--text-1)">${req.DonationCode}</div>
             <button id="cancel-req-btn" style="background:#dc2626;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;width:100%;font-weight:bold;">Cancel Request</button>
             <button id="close-req-btn" style="background:#e5e7eb;color:#333;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;width:100%;margin-top:10px;font-weight:bold;">Close</button>
+        `;
+    }
+
+    modal.innerHTML = `
+        <div style="background:#fff;padding:20px;border-radius:12px;text-align:center;max-width:90%;width:300px;">
+            ${contentHtml}
         </div>
     `;
     modal.style.display = 'flex';
     
-    document.getElementById('cancel-req-btn').onclick = () => {
-        fetch('/api/food-requests/cancel/', {
-            method: 'POST',
-            headers: { 'X-CSRFToken': getCookie('csrftoken') }
-        }).then(() => {
-            modal.style.display = 'none';
-            showToast('Request cancelled', 'info');
-            loadFoodRequests();
-        });
-    };
-    document.getElementById('close-req-btn').onclick = () => modal.style.display = 'none';
+    const confirmBtn = document.getElementById('confirm-req-btn');
+    if (confirmBtn) {
+        confirmBtn.onclick = () => {
+            confirmBtn.textContent = "Confirming...";
+            confirmBtn.disabled = true;
+            fetch('/api/food-requests/confirm/', {
+                method: 'POST',
+                headers: { 'X-CSRFToken': getCookie('csrftoken') }
+            }).then(r => r.json()).then(data => {
+                modal.style.display = 'none';
+                if (data.error) {
+                    showToast(data.error, 'error');
+                } else {
+                    showToast('Receipt confirmed! ' + (data.tx ? '(Saved to blockchain)' : ''), 'success');
+                }
+                loadFoodRequests();
+            });
+        };
+    }
+    
+    const cancelBtn = document.getElementById('cancel-req-btn');
+    if (cancelBtn) {
+        cancelBtn.onclick = () => {
+            fetch('/api/food-requests/cancel/', {
+                method: 'POST',
+                headers: { 'X-CSRFToken': getCookie('csrftoken') }
+            }).then(() => {
+                modal.style.display = 'none';
+                showToast('Request cancelled', 'info');
+                loadFoodRequests();
+            });
+        };
+    }
+    
+    const closeBtn = document.getElementById('close-req-btn');
+    if (closeBtn) {
+        closeBtn.onclick = () => modal.style.display = 'none';
+    }
 }
 
 function openScanQRModal() {
@@ -2816,7 +3072,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     document.getElementById('reset-filters-btn').addEventListener('click', resetAllFilters);
-    document.getElementById('location-button').addEventListener('click', retryGeolocation);
+    const locBtn = document.getElementById('location-button');
+    locBtn.addEventListener('click', retryGeolocation);
+    locBtn.style.right = '50px'; // Move slightly left to avoid overlapping zoom buttons
     document.getElementById('detail-close-btn').addEventListener('click', () => closeDetailPanel());
 
     // --- 2-Finger Pinch/Pan on Detail Panel ---
