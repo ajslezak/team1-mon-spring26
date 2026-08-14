@@ -1,0 +1,2 @@
+import { json, supabase, type Env } from "../../_lib/supabase";
+export const onRequestPost: PagesFunction<Env> = async ({ env, request }) => { const db=supabase(env,request),u=await db.auth.getUser(); if(!u.data.user)return json({error:"Login required"},401); const r=await db.from("food_requests").update({status:"cancelled"}).eq("requester_id",u.data.user.id).in("status",["active","pending_confirmation"]); if(r.error)return json({error:r.error.message},400); return json({ok:true}); };

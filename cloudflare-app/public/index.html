@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Amenity Help</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar"><h1>Amenity Help</h1><span id="status">Loading…</span><span class="auth"><input id="email" type="email" placeholder="Email" /><input id="password" type="password" placeholder="Password" /><button id="login" type="button">Sign in</button><button id="signup" type="button">Sign up</button><button id="logout" type="button" hidden>Sign out</button></span></header>
+      <aside class="sidebar">
+        <label for="search">Search amenities</label><input id="search" type="search" placeholder="Name or address…" />
+        <button id="locate" type="button">◎ Use my location</button>
+        <h3>Show on map</h3><div id="type-filters"></div>
+        <h3>Options</h3><label class="check"><input id="inactive" type="checkbox" /> Show inactive</label><label class="check"><input id="accessible" type="checkbox" /> Accessible only</label>
+        <p id="count">Loading amenities…</p>
+        <button id="food-request" type="button">Request food assistance</button><button id="open-chat" type="button">Open chat</button>
+      </aside>
+      <section id="map" aria-label="OpenStreetMap map"></section>
+      <aside id="details" class="details" hidden></aside>
+      <aside id="chat-panel" class="chat-panel" hidden><h2>Chat</h2><select id="chat-select"></select><div id="chat-messages"></div><form id="chat-form"><input id="chat-text" placeholder="Write a message…" autocomplete="off" /><button>Send</button></form></aside>
+    </main>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

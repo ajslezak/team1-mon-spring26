@@ -1,0 +1,2 @@
+import { json, supabase, type Env } from "../../_lib/supabase";
+export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => { const db=supabase(env,request); const result=await db.from("food_requests").select("id,requester_id,latitude,longitude,status,created_at,expires_at").eq("status","active").gt("expires_at",new Date().toISOString()); if(result.error)return json({error:result.error.message},500); return json({requests:result.data||[]}); };

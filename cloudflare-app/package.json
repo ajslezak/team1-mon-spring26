@@ -1,0 +1,22 @@
+{
+  "name": "amenity-help-cloudflare",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler pages dev public",
+    "deploy": "wrangler pages deploy public",
+    "check": "tsc --noEmit",
+    "import": "tsx scripts/import-sources.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.0",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260814.1",
+    "@types/node": "^24.3.0",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2",
+    "wrangler": "^4.30.0"
+  }
+}

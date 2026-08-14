@@ -1,0 +1,7 @@
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_PUBLISHABLE_KEY=sb_publishable_your_key
+# The names used by the existing local .env.postgres are also accepted:
+# DATABASE_API=https://your-project.supabase.co
+# PUBLISHABLE_DB_KEY=sb_publishable_your_key
+# Only needed by server-side/admin jobs; never expose this to the browser.
+# SUPABASE_SECRET_KEY=sb_secret_your_key
