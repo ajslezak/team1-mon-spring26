@@ -2630,7 +2630,7 @@ def report_availability_api(request, amenity_id):
 
 
 def broadcast_food_event(event_type, trigger_user_id, event_data, target_user_id=None):
-    """Helper to broadcast food request updates to all other connected clients via SSE."""
+    """Helper to broadcast food request updates to all connected clients via SSE."""
     payload = json.dumps({"type": event_type, "data": event_data})
     if target_user_id:
         user_ids = [target_user_id]
@@ -2887,7 +2887,7 @@ def record_donation_on_solana(donor_email, recipient_email):
         return str(signature.value)
     except ImportError:
         print(
-            "Solana libraries (solana, solders) not installed. Skipping blockchain record."
+            "Solana libraries not installed. Skipping blockchain record."
         )
         return None
     except Exception as e:
@@ -2952,7 +2952,7 @@ def food_request_confirm_api(request):
                 "food_donation_confirmed",
                 request.user.id,
                 {
-                    "Message": "Recipient has confirmed the food donation! Recorded on Solana blockchain."
+                    "Message": "Recipient confirmed donation! Recorded on blockchain."
                 },
                 target_user_id=target_item["DonorId"],
             )
