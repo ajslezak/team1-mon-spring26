@@ -55,7 +55,11 @@ urlpatterns = [
         name="password_reset_complete",
     ),
     path("accounts/", include("allauth.urls")),
-    path("api/food-requests/confirm/", food_request_confirm_api, name="food_request_confirm"),
+    path(
+        "api/food-requests/confirm/",
+        food_request_confirm_api,
+        name="food_request_confirm",
+    ),
     path("", include("maps.urls")),
 ]
 
