@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - develop
+      - aws.dynamo
   repository_dispatch:
     types: [asg_instance_refresh]
 jobs:
