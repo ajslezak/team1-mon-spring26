@@ -2886,9 +2886,7 @@ def record_donation_on_solana(donor_email, recipient_email):
         signature = client.send_transaction(txn)
         return str(signature.value)
     except ImportError:
-        print(
-            "Solana libraries not installed. Skipping blockchain record."
-        )
+        print("Solana libraries not installed. Skipping blockchain record.")
         return None
     except Exception as e:
         print(f"Solana transaction failed: {e}")
@@ -2951,9 +2949,7 @@ def food_request_confirm_api(request):
             broadcast_food_event(
                 "food_donation_confirmed",
                 request.user.id,
-                {
-                    "Message": "Recipient confirmed donation! Recorded on blockchain."
-                },
+                {"Message": "Recipient confirmed donation! Recorded on blockchain."},
                 target_user_id=target_item["DonorId"],
             )
 
