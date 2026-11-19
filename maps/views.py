@@ -2962,3 +2962,89 @@ def food_request_confirm_api(request):
         )
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
+
+def donations_view(request):
+    """Render the public food donations and assistance log."""
+    return render(
+        request,
+        "maps/donations.html",
+        {
+            "donations_link_active": True,
+            "show_auth_button": not request.user.is_authenticated,
+            "hide_user_menu": not request.user.is_authenticated,
+            "show_profile_link": True,
+            "show_settings_link": True,
+            "current_email": (
+                request.user.email if request.user.is_authenticated else ""
+            ),
+            "avatar_src": (
+                request.user.avatar_url
+                if request.user.is_authenticated
+                and hasattr(request.user, "avatar_url")
+                and request.user.avatar_url
+                else "/static/maps/default-avatar.svg"
+            ),
+        },
+    )
+
+
+def donations_api(request):
+    """Return JSON list of recorded food donations."""
+    try:
+        limit = min(int(request.GET.get("limit", 50)), 100)
+    except (ValueError, TypeError):
+        limit = 50
+
+    donations = (
+        FoodDonation.objects.select_related("donor", "requester")
+        .order_by("-created_at")[:limit]
+    )
+
+    data = []
+    for d in donations:
+        tx = d.solana_tx_signature or None
+        explorer_url = None
+        if tx:
+            if tx.startswith("0x"):
+                explorer_url = f"https://basescan.org/tx/{tx}"
+            else:
+                explorer_url = (
+                    f"https://explorer.solana.com/tx/{tx}?cluster=custom&customUrl=http%3A%2F%2Flocalhost%3A8899"
+                )
+
+        donor_display = (
+            d.donor.username
+            if d.donor and getattr(d.donor, "username", None)
+            else (
+                d.donor.email.split("@")[0]
+                if d.donor and d.donor.email
+                else "Kind Donor"
+            )
+        )
+        requester_display = (
+            d.requester.username
+            if d.requester and getattr(d.requester, "username", None)
+            else (
+                d.requester.email.split("@")[0]
+                if d.requester and d.requester.email
+                else "Neighbor in Need"
+            )
+        )
+
+        data.append(
+            {
+                "id": d.id,
+                "created_at": d.created_at.isoformat(),
+                "donor": {"username": donor_display},
+                "requester": {"username": requester_display},
+                "latitude": d.latitude,
+                "longitude": d.longitude,
+                "tx_signature": tx,
+                "explorer_url": explorer_url,
+                "status": "Verified Handoff",
+            }
+        )
+
+    return JsonResponse({"donations": data}, status=200)
+

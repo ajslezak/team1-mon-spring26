@@ -9,6 +9,7 @@
         {% if request.user.is_authenticated %}
             <a class="topnav-link{% if chats_link_active %} active{% endif %}" href="{% url 'maps:chats' %}">Chats</a>
         {% endif %}
+        <a class="topnav-link{% if donations_link_active %} active{% endif %}" href="{% url 'maps:donations' %}">Donations</a>
     </div>
 
     <div class="topnav-right">

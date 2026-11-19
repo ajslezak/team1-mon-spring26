@@ -18,6 +18,9 @@ urlpatterns = [
         name="profile_favorites_api",
     ),
     path("chats/", views.chats_view, name="chats"),
+    path("donations/", views.donations_view, name="donations"),
+    path("donations.html", views.donations_view, name="donations_html"),
+    path("api/donations/", views.donations_api, name="donations_api"),
     path("api/amenities/", views.amenities_api, name="amenities_api"),
     path("api/amenities/search/", views.amenity_search_api, name="amenity_search_api"),
     path(
