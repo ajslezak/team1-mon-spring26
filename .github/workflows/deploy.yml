@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - develop
+      - aws.dynamo
   repository_dispatch:
     types: [asg_instance_refresh]
 jobs:
@@ -124,13 +125,17 @@ jobs:
             echo "Instance found: $INSTANCE_EXISTS"
           fi
 
+          # Resolve branch: use Lambda payload if triggered via repository_dispatch, otherwise use push ref
+          TARGET_BRANCH="${{ github.event.client_payload.branch || github.ref_name }}"
+          echo "Deploying branch: $TARGET_BRANCH"
+          
           # 2. Use the ID we just found directly instead of tags
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_EXISTS" \
             --document-name "AWS-RunShellScript" \
-            --comment "Deploying latest application code" \
+            --comment "Deploying latest application code on $TARGET_BRANCH" \
             --parameters 'commands=[
-              "su - ec2-user -c \"cd /home/ec2-user/app && if [ ! -d .git ]; then git init && git remote add origin https://github.com/${{ github.repository }}.git; fi && git fetch && git reset --hard origin/${{ github.ref_name }}\"",
+              "su - ec2-user -c \"cd /home/ec2-user/app && if [ ! -d .git ]; then git init && git remote add origin https://github.com/${{ github.repository }}.git; fi && git fetch && git reset --hard origin/$TARGET_BRANCH\"",
               "su - ec2-user -c \"cd /home/ec2-user/app && if [ ! -d venv ]; then python3.14 -m venv venv; fi\"",
               "su - ec2-user -c \"cd /home/ec2-user/app && source venv/bin/activate && pip install -r requirements.txt\"",
               "su - ec2-user -c \"cd /home/ec2-user/app && source venv/bin/activate && python manage.py collectstatic --noinput\"",
