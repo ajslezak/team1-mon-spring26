@@ -9,8 +9,14 @@ dnf update -y
 dnf install -y git python3.14 python3.14-pip nginx
 
 # 2. Install Cloudflare WARP (Provides outbound IPv4 access for GitHub and AWS SSM)
-curl -fsSl https://pkg.cloudflareclient.com/cloudflare-warp-ascii.repo | tee /etc/yum.repos.d/cloudflare-warp.repo
-dnf install -y cloudflare-warp
+curl -fsSl https://pkg.cloudflareclient.com/cloudflare-warp-ascii.repo |sed -e "s/\$releasever/9/g"| tee /etc/yum.repos.d/cloudflare-warp.repo
+#dnf install -y cloudflare-warp
+dnf repoquery --requires --resolve --arch=aarch64 cloudflare-warp \
+  | grep -vi gtk \
+  | xargs -r dnf install -y
+dnf download --arch=aarch64 cloudflare-warp --destdir=/tmp && \
+rpm -ivh --nodeps /tmp/cloudflare-warp-*.aarch64.rpm && \
+rm -f /tmp/cloudflare-warp-*.aarch64.rpm
 systemctl enable --now warp-svc
 sleep 2
 warp-cli --accept-tos registration new || true
@@ -36,7 +42,7 @@ mkdir -p /home/ec2-user/app
 chown -R ec2-user:ec2-user /home/ec2-user/app
 
 REGION=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
-aws ssm get-parameter --name "/nycnow/env/${ENVIRONMENT}" --with-decryption --query "Parameter.Value" --output text --region $REGION > /home/ec2-user/app/.env
+aws ssm get-parameter --name "/nycnow/env/feature" --with-decryption --query "Parameter.Value" --output text --region $REGION > /home/ec2-user/app/.env
 
 chown ec2-user:ec2-user /home/ec2-user/app/.env
 chmod 600 /home/ec2-user/app/.env
@@ -47,7 +53,7 @@ source /home/ec2-user/app/.env
 set +a
 
 # 5. Dynamically update Cloudflare DNS Records
-CF_API_URL="https://api.cloudflare.com/client/v4/zones/$${CF_ZONE_ID}/dns_records"
+CF_API_URL="https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records"
 
 update_cloudflare_record() {
   local record_type=$1
@@ -62,7 +68,7 @@ update_cloudflare_record() {
 
   echo "Updating Cloudflare $record_type Record $record_name to $record_content (proxied: $proxied)..."
   RECORD_ID=$(curl -s -X GET "$CF_API_URL?type=$record_type&name=$record_name" \
-    -H "Authorization: Bearer $${CF_API_TOKEN}" \
+    -H "Authorization: Bearer ${CF_API_TOKEN}" \
     -H "Content-Type: application/json" | grep -o '"id":"[^"]*' | head -n 1 | cut -d'"' -f4)
 
   local HTTP_METHOD="POST"
@@ -72,13 +78,13 @@ update_cloudflare_record() {
     URL_PATH="$CF_API_URL/$RECORD_ID"
   fi
 
-  RESULT=$(curl -s -X $HTTP_METHOD "$URL_PATH" -H "Authorization: Bearer $${CF_API_TOKEN}" -H "Content-Type: application/json" --data "{\"type\":\"$record_type\",\"name\":\"$record_name\",\"content\":\"$record_content\",\"ttl\":1,\"proxied\":$proxied}")
+  RESULT=$(curl -s -X $HTTP_METHOD "$URL_PATH" -H "Authorization: Bearer ${CF_API_TOKEN}" -H "Content-Type: application/json" --data "{\"type\":\"$record_type\",\"name\":\"$record_name\",\"content\":\"$record_content\",\"ttl\":1,\"proxied\":$proxied}")
   echo "Cloudflare API Response: $RESULT"
 }
 
-update_cloudflare_record "AAAA" "v6-$${CF_RECORD_NAME}" "$${IPV6}" "true"
-update_cloudflare_record "AAAA" "ssh.$${CF_RECORD_NAME}" "$${IPV6}" "false"
-update_cloudflare_record "CNAME" "$${CF_RECORD_NAME}" "v6-$${CF_RECORD_NAME}" "true"
+update_cloudflare_record "AAAA" "v6-${CF_RECORD_NAME}" "${IPV6}" "true"
+update_cloudflare_record "AAAA" "ssh.${CF_RECORD_NAME}" "${IPV6}" "false"
+update_cloudflare_record "CNAME" "${CF_RECORD_NAME}" "v6-${CF_RECORD_NAME}" "true"
 
 # 6. Restart AWS SSM Agent to instantly register over the new WARP IPv4 tunnel
 systemctl restart amazon-ssm-agent
